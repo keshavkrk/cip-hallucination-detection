@@ -1,5 +1,5 @@
 import logging
-from llm_interface.mock_llm import llm_answer
+from llm_interface.real_llm import llm_answer   # ✅ real LLM
 from negation.rule_negator import negate_question
 from negation.nli_scorer import NLIScorer
 from negation.intent_gate import is_factual_question
@@ -7,12 +7,15 @@ from negation.intent_gate import is_factual_question
 
 class NegationProbe:
     """
-    Module 4: Negation Probe
-    NLI model is loaded ONCE and reused.
+    Module 4: Negation Probe (100%)
+
+    - spaCy-based negation
+    - SAME real LLM answers negated question
+    - MNLI contradiction detection (offline)
     """
 
     def __init__(self):
-        self.nli = NLIScorer()  # lightweight handle, model already loaded
+        self.nli = NLIScorer()   # model already loaded once
         logging.basicConfig(level=logging.INFO)
         self.logger = logging.getLogger("Module4")
 
@@ -24,13 +27,13 @@ class NegationProbe:
                 "reason": "non_factual_question"
             }
 
-        # Rule-based negation
+        # Step 1: Negate question (spaCy)
         neg_question = negate_question(question)
 
-        # Same LLM answers negated question
+        # Step 2: Same LLM answers negated question
         neg_answer = llm_answer(neg_question)
 
-        # Contradiction score (MNLI)
+        # Step 3: MNLI contradiction score
         score = self.nli.contradiction_score(
             premise=original_answer,
             hypothesis=neg_answer

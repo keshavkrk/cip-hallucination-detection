@@ -1,16 +1,23 @@
-def rephrase_question(question: str) -> str:
+from llm_interface.real_llm import llm_answer
+
+
+def rephrase_question(question: str, k: int = 3) -> list[str]:
     """
-    Mock rephraser for 30% implementation.
-    Deterministic and offline.
+    Generate k paraphrases of a question using real LLM.
     """
 
-    q = question.lower()
+    prompt = (
+        f"Generate {k} different paraphrases of the following question.\n"
+        f"Return only the paraphrased questions, one per line.\n\n"
+        f"Question: {question}"
+    )
 
-    if "who invented the telephone" in q:
-        return "Can you tell me who was the inventor of the telephone?"
+    response = llm_answer(prompt)
 
-    if "king of mars" in q:
-        return "Who is considered the ruler of Mars?"
+    paraphrases = [
+        line.strip("- ").strip()
+        for line in response.split("\n")
+        if line.strip()
+    ]
 
-    # fallback: return original question
-    return question
+    return paraphrases[:k]
