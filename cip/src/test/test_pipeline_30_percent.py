@@ -9,7 +9,7 @@ def test_full_pipeline(question: str):
     # ---------------------------
     # Module 2: Preprocessing + LLM answer
     # ---------------------------
-    print("▶ Module 2: Preprocessing + LLM Answer")
+    print("▶ Module 2: Preproce ssing + LLM Answer")
     m2_out = module2_process(question)
 
     print("Question :", m2_out["question"])
@@ -49,4 +49,5 @@ def test_full_pipeline(question: str):
 
 
 if __name__ == "__main__":
-    test_full_pipeline("Who invented the telephone?")
+    test_full_pipeline("Who is the king of mars?")
+ 

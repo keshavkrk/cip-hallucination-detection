@@ -37,42 +37,35 @@ def clean_text(text: str) -> str:
 # -------------------------------------------------
 # Module 2 main entry point
 # -------------------------------------------------
-def module2_process(question: str) -> dict:
+def module2_process(question: str, answer: str | None = None) -> dict:
     """
     Module 2: Text Preprocessing
 
-    Input:
-        - question (string) from user / GUI
-
-    Output:
-        {
-          question: cleaned question,
-          answer: mock LLM answer,
-          qa_text: combined QA text,
-          input_ids: tensor [1, 512],
-          attention_mask: tensor [1, 512]
-        }
+    If answer is None → calls LLM (inference mode)
+    If answer is provided → uses given answer (training mode)
     """
 
     # ---------------------------
-    # Step 2.0 – Get LLM answer
+    # Step 1 – Get answer if needed
     # ---------------------------
-    raw_answer = llm_answer(question)
+    if answer is None:
+        raw_answer = llm_answer(question)
+    else:
+        raw_answer = answer
 
     # ---------------------------
-    # Step 2.1 – Clean text
+    # Step 2 – Clean text
     # ---------------------------
     question_clean = clean_text(question)
     answer_clean = clean_text(raw_answer)
 
     # ---------------------------
-    # Step 2.2 – QA pair formation (CRITICAL)
-    # DO NOT add [CLS] manually
+    # Step 3 – QA pair formation
     # ---------------------------
     qa_text = question_clean + " [SEP] " + answer_clean
 
     # ---------------------------
-    # Step 2.4 – Tokenization
+    # Step 4 – Tokenization
     # ---------------------------
     encoded = tokenizer(
         qa_text,
@@ -82,13 +75,10 @@ def module2_process(question: str) -> dict:
         return_tensors="pt"
     )
 
-    # ---------------------------
-    # Step 2.7 – Return tensors
-    # ---------------------------
     return {
         "question": question_clean,
         "answer": answer_clean,
         "qa_text": qa_text,
-        "input_ids": encoded["input_ids"],          # [1, 512]
-        "attention_mask": encoded["attention_mask"] # [1, 512]
+        "input_ids": encoded["input_ids"],
+        "attention_mask": encoded["attention_mask"]
     }
