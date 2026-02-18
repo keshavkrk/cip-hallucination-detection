@@ -38,7 +38,7 @@ def llm_answer(prompt: str) -> str:
                 },
                 {"role": "user", "content": prompt}
             ],
-            temperature=0.1,
+            temperature=0,
             max_tokens=256
         )
         answer = response.choices[0].message.content.strip()
