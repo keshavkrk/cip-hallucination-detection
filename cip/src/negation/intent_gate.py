@@ -1,24 +1,27 @@
 def is_factual_question(question: str) -> bool:
     """
     Determines whether negation is logically meaningful.
-    Less strict: allows entity hallucinations while blocking opinions.
+
+    Strategy:
+    - Block clearly explanatory (why/how)
+    - Block clearly subjective/opinion queries
+    - Allow everything else (including conditionals)
     """
 
     q = question.lower().strip()
 
-    # Exclude explanatory questions
+    # Block explanatory reasoning questions
     if q.startswith(("why", "how")):
         return False
 
-    # Opinion markers (only block if explicitly subjective)
+    # Block explicit opinion-based questions
     opinion_markers = [
-        "best", "worst", "greatest", "most", "favorite",
-        "better", "opinion"
+        "best", "worst", "greatest", "most",
+        "favorite", "better", "opinion"
     ]
 
-    if any(marker in q for marker in opinion_markers) and q.startswith(("who", "what")):
+    if any(marker in q for marker in opinion_markers):
         return False
 
-    # Allow common factual patterns
-    factual_starts = ("who", "what", "when", "where", "which", "is", "are")
-    return q.startswith(factual_starts)
+    # Otherwise allow
+    return True

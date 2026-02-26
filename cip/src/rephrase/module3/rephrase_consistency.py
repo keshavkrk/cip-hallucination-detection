@@ -6,21 +6,14 @@ from rephrase.module3.rephraser import rephrase_question
 from llm_interface.real_llm import llm_answer
 
 
-# ---------------------------
-# Intent gate
-# ---------------------------
-def is_factual(question: str) -> bool:
-    q = question.lower().strip()
-    return q.startswith(("who", "what", "when", "where", "which"))
-
-
 class RephraseConsistencyAnalyzer:
     """
-    Module 3: Rephrase Consistency Analyzer (100%)
+    Module 3: Rephrase Consistency Analyzer
 
-    - Real LLM paraphrasing
-    - k paraphrases
-    - Semantic consistency via SBERT
+    - No intent gate
+    - Always attempts paraphrasing
+    - Always returns float consistency_score
+    - Exception safe
     """
 
     def __init__(
@@ -50,44 +43,64 @@ class RephraseConsistencyAnalyzer:
     # ---------------------------
     def run(self, question: str, original_answer: str) -> dict:
 
-        if not is_factual(question):
+        try:
+            # Step 1: Generate paraphrases
+            paraphrases = rephrase_question(question, k=self.k)
+
+            if not paraphrases:
+                return {
+                    "consistency_score": 0.0,
+                    "paraphrases": [],
+                    "rephrased_answers": [],
+                    "reason": "no_paraphrases_generated"
+                }
+
+            scores = []
+            answers = []
+
+            # Step 2: Re-query LLM for each paraphrase
+            for q_re in paraphrases:
+                try:
+                    a_re = llm_answer(q_re)
+                    sim = self._embed_similarity(original_answer, a_re)
+
+                    scores.append(sim)
+                    answers.append(a_re)
+
+                except Exception:
+                    continue
+
+            # If similarity failed completely
+            if not scores:
+                return {
+                    "consistency_score": 0.0,
+                    "paraphrases": paraphrases,
+                    "rephrased_answers": answers,
+                    "reason": "similarity_failed"
+                }
+
+            # Step 3: Aggregate similarity
+            final_score = sum(scores) / len(scores)
+
+            # Logging
+            self.logger.info("Module 3 executed successfully")
+            self.logger.info(f"Q_original : {question}")
+            self.logger.info(f"Paraphrases: {paraphrases}")
+            self.logger.info(f"Scores     : {[round(s,4) for s in scores]}")
+            self.logger.info(f"FinalScore : {final_score:.4f}")
+
             return {
-                "consistency_score": None,
-                "reason": "non_factual_question"
+                "consistency_score": final_score,
+                "paraphrases": paraphrases,
+                "rephrased_answers": answers,
+                "reason": None
             }
 
-        # Step 1: Generate paraphrases
-        paraphrases = rephrase_question(question, k=self.k)
-
-        if len(paraphrases) == 0:
+        except Exception as e:
+            self.logger.warning(f"Consistency module failed: {e}")
             return {
                 "consistency_score": 0.0,
-                "reason": "no_paraphrases_generated"
+                "paraphrases": [],
+                "rephrased_answers": [],
+                "reason": "exception"
             }
-
-        scores = []
-        answers = []
-
-        # Step 2: Re-query LLM for each paraphrase
-        for q_re in paraphrases:
-            a_re = llm_answer(q_re)
-            sim = self._embed_similarity(original_answer, a_re)
-
-            scores.append(sim)
-            answers.append(a_re)
-
-        # Step 3: Aggregate similarity (mean)
-        final_score = sum(scores) / len(scores)
-
-        # Logging
-        self.logger.info("Module 3 executed successfully")
-        self.logger.info(f"Q_original : {question}")
-        self.logger.info(f"Paraphrases: {paraphrases}")
-        self.logger.info(f"Scores     : {[round(s,4) for s in scores]}")
-        self.logger.info(f"FinalScore : {final_score:.4f}")
-
-        return {
-            "consistency_score": final_score,
-            "paraphrases": paraphrases,
-            "rephrased_answers": answers
-        }
