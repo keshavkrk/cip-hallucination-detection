@@ -118,8 +118,20 @@ m4 = NegationProbe()
 
 def run_cip_pipeline(question: str) -> dict:
 
+    print("\n" + "=" * 70)
+    print("              CIP HALLUCINATION DETECTION PIPELINE")
+    print("=" * 70)
+    print(f"  Input Question: {question}")
+    print("=" * 70)
+
     # Step 1: LLM answer
     answer = llm_answer(question)
+
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  MODULE 2 · TEXT PREPROCESSING                                │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    print(f"│  Question (clean) : {question[:55]}")
+    print(f"│  LLM Answer       : {answer[:55]}{'…' if len(answer) > 55 else ''}")
 
     # Step 2: Embedding
     m2 = module2_process(question, answer)
@@ -129,6 +141,19 @@ def run_cip_pipeline(question: str) -> dict:
         m2["attention_mask"]
     ).cpu().numpy().flatten()
 
+    print(f"│  QA Text           : {m2['qa_text'][:55]}{'…' if len(m2['qa_text']) > 55 else ''}")
+    print(f"│  Input IDs shape   : {m2['input_ids'].shape}")
+    print(f"│  Attention mask    : {m2['attention_mask'].shape}")
+    print("└─────────────────────────────────────────────────────────────────┘")
+
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  MODULE 5 · TRANSFORMER FEATURE EXTRACTION (DistilBERT)       │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    print(f"│  Embedding shape   : ({len(embedding)},)")
+    print(f"│  Embedding [0:5]   : {[round(float(x), 4) for x in embedding[:5]]}")
+    print(f"│  Embedding norm    : {float(np.linalg.norm(embedding)):.4f}")
+    print("└─────────────────────────────────────────────────────────────────┘")
+
     # Step 3: Consistency
     m3_out = m3.run(question, answer)
 
@@ -136,12 +161,39 @@ def run_cip_pipeline(question: str) -> dict:
     paraphrases = m3_out.get("paraphrases", [])
     rephrased_answers = m3_out.get("rephrased_answers", [])
 
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  MODULE 3 · REPHRASE CONSISTENCY ANALYZER                     │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    print(f"│  Consistency Score : {consistency:.4f}")
+    print(f"│  Paraphrases ({len(paraphrases)})  :")
+    for i, p in enumerate(paraphrases, 1):
+        print(f"│    {i}. {p[:58]}{'…' if len(p) > 58 else ''}")
+    print(f"│  Rephrased Answers ({len(rephrased_answers)}):")
+    for i, a in enumerate(rephrased_answers, 1):
+        print(f"│    {i}. {a[:58]}{'…' if len(a) > 58 else ''}")
+    if m3_out.get("reason"):
+        print(f"│  Reason            : {m3_out['reason']}")
+    print("└─────────────────────────────────────────────────────────────────┘")
+
     # Step 4: Negation
     m4_out = m4.run(question, answer)
 
     negation = m4_out.get("contradiction_score", 0.0)
     negated_question = m4_out.get("negated_question")
     negated_answer = m4_out.get("negated_answer")
+
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  MODULE 4 · NEGATION PROBE                                    │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    print(f"│  Contradiction Flag  : {m4_out.get('antonym_contradiction_flag', 0)}")
+    print(f"│  Contradiction Score : {negation:.4f}")
+    if negated_question:
+        print(f"│  Negated Question    : {negated_question[:55]}{'…' if len(negated_question) > 55 else ''}")
+    if negated_answer:
+        print(f"│  Negated Answer      : {negated_answer[:55]}{'…' if len(negated_answer) > 55 else ''}")
+    if m4_out.get("reason"):
+        print(f"│  Reason              : {m4_out['reason']}")
+    print("└─────────────────────────────────────────────────────────────────┘")
 
     # Step 5: Feature vector
     vector = np.concatenate([
@@ -152,12 +204,29 @@ def run_cip_pipeline(question: str) -> dict:
 
     vector = np.nan_to_num(vector)
 
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  FEATURE VECTOR CONSTRUCTION                                  │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    print(f"│  Vector shape       : {vector.shape}")
+    print(f"│  [0..767] embedding : DistilBERT CLS ({len(embedding)} dims)")
+    print(f"│  [768] consistency  : {consistency:.4f}")
+    print(f"│  [769] negation     : {negation:.4f}")
+    print("└─────────────────────────────────────────────────────────────────┘")
+
     # Step 6: Model probability
     model = _get_model()
     if model is not None:
         p_model = model.predict_proba(vector)[0, 1]
     else:
         p_model = 0.3  # lean factual when model not available (innocent until proven guilty)
+
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  MODULE 6 · HALLUCINATION CLASSIFIER (Calibrated SVM)         │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    print(f"│  Model loaded       : {'✅ Yes' if model is not None else '❌ No (using default p=0.3)'}")
+    print(f"│  P(hallucination)   : {p_model:.4f}")
+    print(f"│  P(factual)         : {1 - p_model:.4f}")
+    print("└─────────────────────────────────────────────────────────────────┘")
 
     # Step 7: Adaptive Fusion
     final_risk = fuse_prediction(
@@ -168,12 +237,36 @@ def run_cip_pipeline(question: str) -> dict:
 
     prediction = "Hallucination" if final_risk > 0.5 else "Factual"
 
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  MODULE 7 · FEATURE FUSION LAYER (Adaptive Weights)           │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    print(f"│  Inputs:")
+    print(f"│    p_model (embedding)     : {p_model:.4f}")
+    print(f"│    consistency_score       : {consistency:.4f}")
+    print(f"│    negation_score          : {negation:.4f}")
+    print(f"│  Final Fused Risk          : {final_risk:.4f}")
+    print(f"│  Prediction                : {'🔴 ' + prediction if prediction == 'Hallucination' else '🟢 ' + prediction}")
+    print("└─────────────────────────────────────────────────────────────────┘")
+
     # Step 8: Direct Decomposition (always available)
     decomposition = decompose_prediction(
         p_model=p_model,
         consistency_score=consistency,
         negation_score=negation,
     )
+
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  MODULE 8 · CONFIDENCE CALIBRATION (Direct Decomposition)     │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    emb_d = decomposition["embedding"]
+    con_d = decomposition["consistency"]
+    neg_d = decomposition["negation"]
+    print(f"│  Embedding   → weight: {emb_d['weight']:.3f}  contrib: {emb_d['contribution']:.4f}  ({emb_d['percentage']:.1f}%)")
+    print(f"│  Consistency → weight: {con_d['weight']:.3f}  contrib: {con_d['contribution']:.4f}  ({con_d['percentage']:.1f}%)")
+    print(f"│  Negation    → weight: {neg_d['weight']:.3f}  contrib: {neg_d['contribution']:.4f}  ({neg_d['percentage']:.1f}%)")
+    print(f"│  Dominant Signal     : ⭐ {decomposition['dominant_signal']}")
+    print(f"│  Adaptive Weights    : α={decomposition['weights_used']['alpha']:.3f}  β={decomposition['weights_used']['beta']:.3f}  γ={decomposition['weights_used']['gamma']:.3f}")
+    print("└─────────────────────────────────────────────────────────────────┘")
 
     # Step 9: LIME Explainability (when model exists)
     lime_explanation = None
@@ -184,6 +277,18 @@ def run_cip_pipeline(question: str) -> dict:
         except Exception as e:
             logger.warning(f"LIME explanation failed: {e}")
 
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  MODULE 9 · EXPLAINABILITY (LIME)                             │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    if lime_explanation:
+        print(f"│  Embedding Signal    : {lime_explanation['embedding_signal']:+.4f}")
+        print(f"│  Consistency Signal  : {lime_explanation['consistency_signal']:+.4f}")
+        print(f"│  Negation Signal     : {lime_explanation['negation_signal']:+.4f}")
+        print(f"│  Dominant Signal     : ⭐ {lime_explanation['dominant_signal']}")
+    else:
+        print("│  ⚠️  LIME unavailable (model or background data not found)")
+    print("└─────────────────────────────────────────────────────────────────┘")
+
     # Step 10: Natural Language Explanation
     why_explanation = _generate_why_explanation(
         prediction=prediction,
@@ -191,6 +296,19 @@ def run_cip_pipeline(question: str) -> dict:
         negation=negation,
         decomposition=decomposition,
     )
+
+    print("\n┌─────────────────────────────────────────────────────────────────┐")
+    print("│  MODULE 10 · NATURAL LANGUAGE EXPLANATION                     │")
+    print("├─────────────────────────────────────────────────────────────────┤")
+    # Word-wrap the explanation to fit the box
+    _why_lines = [why_explanation[i:i+60] for i in range(0, len(why_explanation), 60)]
+    for line in _why_lines:
+        print(f"│  {line}")
+    print("└─────────────────────────────────────────────────────────────────┘")
+
+    print("\n" + "=" * 70)
+    print(f"  FINAL RESULT: {prediction}  |  Risk: {final_risk:.4f}  |  Confidence: {1 - final_risk:.4f}")
+    print("=" * 70 + "\n")
 
     return {
         "answer": answer,
