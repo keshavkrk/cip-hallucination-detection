@@ -9,7 +9,7 @@ PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, ".."))
 sys.path.append(PROJECT_ROOT)
 
 # -------------------------------------------------
-# Now imports will work
+# Imports
 # -------------------------------------------------
 
 import logging
@@ -21,7 +21,7 @@ from preprocessing.module2_preprocess import module2_process
 from classifier.feature_extractor import DistilBERTFeatureExtractor
 from rephrase.module3.rephrase_consistency import RephraseConsistencyAnalyzer
 from negation.negation_probe import NegationProbe
-from fusion.fusion_layer import fuse_prediction
+from fusion.fusion_layer import fuse_prediction, decompose_prediction
 from explainability.lime_explainer import CIPExplainer
 
 logger = logging.getLogger("CIPPipeline")
@@ -57,6 +57,58 @@ def _get_explainer():
         except Exception as e:
             logger.warning(f"Could not load LIME explainer: {e}")
     return None
+
+
+def _generate_why_explanation(
+    prediction: str,
+    consistency: float,
+    negation: float,
+    decomposition: dict,
+) -> str:
+    """
+    Generate a natural-language explanation of WHY the system made
+    its prediction, using the LLM itself for readable output.
+    Falls back to a template-based explanation if the LLM call fails.
+    """
+
+    dominant = decomposition["dominant_signal"]
+    emb_pct = decomposition["embedding"]["percentage"]
+    con_pct = decomposition["consistency"]["percentage"]
+    neg_pct = decomposition["negation"]["percentage"]
+
+    prompt = (
+        f"You are an AI explainability assistant. Explain in 2-3 concise sentences "
+        f"why a hallucination detection system classified an LLM response as "
+        f'"{prediction}". Use these facts:\n\n'
+        f"- Dominant signal: {dominant} ({max(emb_pct, con_pct, neg_pct):.0f}% of decision)\n"
+        f"- Embedding model confidence contributed {emb_pct:.0f}%\n"
+        f"- Rephrase consistency score: {consistency:.2f} (contributed {con_pct:.0f}%)\n"
+        f"- Negation contradiction score: {negation:.2f} (contributed {neg_pct:.0f}%)\n\n"
+        f"Be concise. Explain what each signal means in plain English. "
+        f"Do NOT use bullet points. Write in third person."
+    )
+
+    try:
+        return llm_answer(prompt)
+    except Exception as e:
+        logger.warning(f"LLM explanation failed: {e}")
+        # Template fallback
+        if prediction == "Hallucination":
+            return (
+                f"The system flagged this response as a potential hallucination. "
+                f"The {dominant.lower()} signal was the strongest contributor "
+                f"({max(emb_pct, con_pct, neg_pct):.0f}% of the decision). "
+                f"The rephrase consistency score was {consistency:.2f} and the "
+                f"negation contradiction score was {negation:.2f}."
+            )
+        else:
+            return (
+                f"The system determined this response is likely factual. "
+                f"The {dominant.lower()} signal was the dominant factor "
+                f"({max(emb_pct, con_pct, neg_pct):.0f}% of the decision). "
+                f"The response was consistent across rephrasings ({consistency:.2f}) "
+                f"and showed low contradiction ({negation:.2f})."
+            )
 
 
 extractor = DistilBERTFeatureExtractor()
@@ -105,10 +157,9 @@ def run_cip_pipeline(question: str) -> dict:
     if model is not None:
         p_model = model.predict_proba(vector)[0, 1]
     else:
-        p_model = 0.5  # neutral fallback when model not trained yet
+        p_model = 0.3  # lean factual when model not available (innocent until proven guilty)
 
-    # Step 7: Fusion
-
+    # Step 7: Adaptive Fusion
     final_risk = fuse_prediction(
         p_model=p_model,
         consistency_score=consistency,
@@ -117,14 +168,29 @@ def run_cip_pipeline(question: str) -> dict:
 
     prediction = "Hallucination" if final_risk > 0.5 else "Factual"
 
-    # Step 8: Explainability (LIME)
-    explanation = None
+    # Step 8: Direct Decomposition (always available)
+    decomposition = decompose_prediction(
+        p_model=p_model,
+        consistency_score=consistency,
+        negation_score=negation,
+    )
+
+    # Step 9: LIME Explainability (when model exists)
+    lime_explanation = None
     explainer = _get_explainer()
     if explainer is not None:
         try:
-            explanation = explainer.explain_instance(vector.flatten())
+            lime_explanation = explainer.explain_instance(vector.flatten())
         except Exception as e:
             logger.warning(f"LIME explanation failed: {e}")
+
+    # Step 10: Natural Language Explanation
+    why_explanation = _generate_why_explanation(
+        prediction=prediction,
+        consistency=consistency,
+        negation=negation,
+        decomposition=decomposition,
+    )
 
     return {
         "answer": answer,
@@ -138,5 +204,7 @@ def run_cip_pipeline(question: str) -> dict:
         "negated_question": negated_question,
         "negated_answer": negated_answer,
         "model_loaded": model is not None,
-        "explanation": explanation,
+        "decomposition": decomposition,
+        "explanation": lime_explanation,
+        "why_explanation": why_explanation,
     }

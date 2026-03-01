@@ -2,7 +2,7 @@ import logging
 from llm_interface.real_llm import llm_answer
 from negation.rule_negator import negate_question
 from negation.nli_scorer import NLIScorer
-from negation.intent_gate import is_factual_question
+from negation.intent_gate import negation_confidence
 
 
 class NegationProbe:
@@ -12,6 +12,7 @@ class NegationProbe:
     - spaCy-based negation
     - Same LLM answers negated question
     - MNLI contradiction detection
+    - Dampened scoring for identity questions (who/what/when/where)
     - Guaranteed safe return structure
     """
 
@@ -33,8 +34,9 @@ class NegationProbe:
 
         try:
 
-            # Intent gate check
-            if not is_factual_question(question):
+            # Intent gate — get confidence multiplier
+            confidence = negation_confidence(question)
+            if confidence == 0.0:
                 safe_output["reason"] = "non_factual_question"
                 return safe_output
 
@@ -45,16 +47,19 @@ class NegationProbe:
             neg_answer = llm_answer(neg_question)
 
             # Step 3: MNLI contradiction
-            score = self.nli.contradiction_score(
+            raw_score = self.nli.contradiction_score(
                 premise=original_answer,
                 hypothesis=neg_answer
             )
+
+            # Apply dampening for identity questions (who/what/when/where)
+            score = raw_score * confidence
 
             flag = 1 if score > 0.5 else 0
 
             self.logger.info(f"Q     : {question}")
             self.logger.info(f"Q_neg : {neg_question}")
-            self.logger.info(f"Score : {score:.4f}")
+            self.logger.info(f"Raw   : {raw_score:.4f} × {confidence:.1f} = {score:.4f}")
 
             return {
                 "antonym_contradiction_flag": flag,

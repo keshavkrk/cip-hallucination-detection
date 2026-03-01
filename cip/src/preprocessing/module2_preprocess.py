@@ -1,6 +1,6 @@
 import re
 from transformers import DistilBertTokenizerFast
-from llm_interface.mock_llm import llm_answer
+from llm_interface.real_llm import llm_answer
 
 
 # -------------------------------------------------

@@ -463,10 +463,111 @@ def render_analysis(result: dict):
             <div class="metric-value">{result['negation']:.2f}</div>
         </div>""", unsafe_allow_html=True)
 
-    # Explainability (LIME)
+    # ═══════════════════════════════════════════════
+    # EXPLAINABILITY SECTION
+    # ═══════════════════════════════════════════════
+
+    # ── 1. Natural Language "Why?" ──
+    why_text = result.get("why_explanation")
+    if why_text:
+        st.markdown(
+            '<div class="section-header">'
+            '<span class="dot cyan"></span>WHY THIS VERDICT?</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="xai-card" style="border-left: 3px solid #06b6d4;">'
+            f'💬 {why_text}</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── 2. Direct Decomposition (always available) ──
+    decomposition = result.get("decomposition")
+    if decomposition:
+        st.markdown(
+            '<div class="section-header">'
+            '<span class="dot amber"></span>SIGNAL DECOMPOSITION · Adaptive Weights</div>',
+            unsafe_allow_html=True,
+        )
+
+        emb_d = decomposition["embedding"]
+        con_d = decomposition["consistency"]
+        neg_d = decomposition["negation"]
+        dominant = decomposition["dominant_signal"]
+
+        # Stacked horizontal bar showing percentage breakdown
+        fig_decomp = go.Figure()
+        fig_decomp.add_trace(go.Bar(
+            y=["Risk Breakdown"],
+            x=[emb_d["percentage"]],
+            name=f"Embedding ({emb_d['weight']:.0%})",
+            orientation="h",
+            marker_color="#6366f1",
+            text=[f"{emb_d['percentage']:.0f}%"],
+            textposition="inside",
+            textfont=dict(color="white", size=13, family="Inter"),
+            hovertemplate="Embedding: %{x:.1f}%<extra></extra>",
+        ))
+        fig_decomp.add_trace(go.Bar(
+            y=["Risk Breakdown"],
+            x=[con_d["percentage"]],
+            name=f"Consistency ({con_d['weight']:.0%})",
+            orientation="h",
+            marker_color="#10b981",
+            text=[f"{con_d['percentage']:.0f}%"],
+            textposition="inside",
+            textfont=dict(color="white", size=13, family="Inter"),
+            hovertemplate="Consistency: %{x:.1f}%<extra></extra>",
+        ))
+        fig_decomp.add_trace(go.Bar(
+            y=["Risk Breakdown"],
+            x=[neg_d["percentage"]],
+            name=f"Negation ({neg_d['weight']:.0%})",
+            orientation="h",
+            marker_color="#f43f5e",
+            text=[f"{neg_d['percentage']:.0f}%"],
+            textposition="inside",
+            textfont=dict(color="white", size=13, family="Inter"),
+            hovertemplate="Negation: %{x:.1f}%<extra></extra>",
+        ))
+        fig_decomp.update_layout(
+            barmode="stack",
+            height=120,
+            margin=dict(t=5, b=5, l=0, r=0),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Inter", color="#9ca3af"),
+            xaxis=dict(visible=False, range=[0, 100]),
+            yaxis=dict(visible=False),
+            legend=dict(
+                orientation="h",
+                yanchor="top", y=-0.3, xanchor="center", x=0.5,
+                font=dict(size=11, color="#9ca3af"),
+                bgcolor="rgba(0,0,0,0)",
+            ),
+            bargap=0.3,
+        )
+        st.plotly_chart(fig_decomp, use_container_width=True)
+
+        # Adaptive weights detail card
+        weights = decomposition.get("weights_used", {})
+        st.markdown(
+            f'<div class="xai-card">'
+            f'🧠 <strong>Dominant signal:</strong> '
+            f'<span class="xai-dominant">{dominant}</span>  —  '
+            f'Adaptive weights: '
+            f'<strong style="color:#818cf8">α={weights.get("alpha", 0):.0%}</strong> · '
+            f'<strong style="color:#34d399">β={weights.get("beta", 0):.0%}</strong> · '
+            f'<strong style="color:#fb7185">γ={weights.get("gamma", 0):.0%}</strong>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    # ── 3. LIME Explainability (when model exists) ──
     st.markdown(
-        '<div class="section-header"><span class="dot violet" style="background:#8b5cf6"></span>'
-        "EXPLAINABILITY · LIME</div>",
+        '<div class="section-header">'
+        '<span class="dot violet" style="background:#8b5cf6"></span>'
+        "LIME EXPLAINABILITY</div>",
         unsafe_allow_html=True,
     )
 
@@ -475,9 +576,7 @@ def render_analysis(result: dict):
         emb_sig = explanation["embedding_signal"]
         con_sig = explanation["consistency_signal"]
         neg_sig = explanation["negation_signal"]
-        dominant = explanation["dominant_signal"]
 
-        # Horizontal bar chart
         signals = ["Negation", "Consistency", "Embedding"]
         values = [neg_sig, con_sig, emb_sig]
         colors = ["#f43f5e", "#10b981", "#6366f1"]
@@ -512,11 +611,11 @@ def render_analysis(result: dict):
         st.plotly_chart(fig_xai, use_container_width=True)
 
         st.markdown(
-            f'<div class="xai-card">'
-            f'🧠 <strong>Dominant signal:</strong> '
-            f'<span class="xai-dominant">{dominant}</span>  —  '
-            f'This signal had the strongest influence on the final prediction.'
-            f'</div>',
+            '<div class="xai-card">'
+            "💡 <strong>LIME</strong> uses perturbation-based sampling to "
+            "approximate how each feature group influenced the ML model's prediction. "
+            "Positive values push toward Hallucination; negative toward Factual."
+            "</div>",
             unsafe_allow_html=True,
         )
     else:
@@ -529,7 +628,7 @@ def render_analysis(result: dict):
             unsafe_allow_html=True,
         )
 
-    # Details expander
+    # ── 4. Detailed Analysis Expander ──
     st.markdown(
         '<div class="section-header"><span class="dot emerald"></span>DETAILED ANALYSIS</div>',
         unsafe_allow_html=True,
