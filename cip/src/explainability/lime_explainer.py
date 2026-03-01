@@ -2,85 +2,116 @@
 
 import numpy as np
 import joblib
+import logging
 
 from lime.lime_tabular import LimeTabularExplainer
 from fusion.fusion_layer import fuse_prediction
 
+logger = logging.getLogger("CIPExplainer")
+
+# Feature layout:  [0..767] = embedding,  768 = consistency,  769 = negation
+_EMB_END = 768
+_CONSISTENCY_IDX = 768
+_NEGATION_IDX = 769
+_TOTAL_FEATURES = 770
+
+_FEATURE_NAMES = [f"emb_{i}" for i in range(_EMB_END)] + ["consistency", "negation"]
+
 
 class CIPExplainer:
     """
-    LIME-based grouped explainability:
-    - Embedding (768 dims)
-    - Consistency (1 dim)
-    - Negation (1 dim)
+    LIME-based grouped explainability for the CIP pipeline.
+
+    Groups the 770-dimensional feature vector into three interpretable signals:
+      • Embedding  (768 dims → aggregated into one score)
+      • Consistency (1 dim)
+      • Negation    (1 dim)
+
+    Returns contribution weights showing HOW MUCH each signal pushed
+    the prediction toward hallucination (positive) or factual (negative).
     """
 
-    def __init__(self, model_path, X_background):
+    def __init__(self, model_path: str, X_background: np.ndarray):
         self.model = joblib.load(model_path)
 
         self.explainer = LimeTabularExplainer(
             X_background,
+            feature_names=_FEATURE_NAMES,
             mode="classification",
-            discretize_continuous=True
+            class_names=["Factual", "Hallucination"],
+            discretize_continuous=True,
+            random_state=42,
         )
 
-    def _predict_with_fusion(self, X):
-        """
-        Wraps model + fusion into LIME-compatible predict function
-        """
+    # --------------------------------------------------
+    # LIME-compatible prediction wrapper (model + fusion)
+    # --------------------------------------------------
+    def _predict_with_fusion(self, X: np.ndarray) -> np.ndarray:
         probs = self.model.predict_proba(X)[:, 1]
 
-        fused_probs = []
-        for i in range(len(X)):
-            p_model = probs[i]
-            c_score = X[i, 768]
-            n_score = X[i, 769]
+        fused = np.array([
+            fuse_prediction(
+                p_model=float(probs[i]),
+                consistency_score=float(X[i, _CONSISTENCY_IDX]),
+                negation_score=float(X[i, _NEGATION_IDX]),
+            )
+            for i in range(len(X))
+        ])
 
-            fused = fuse_prediction(p_model, c_score, n_score)
-            fused_probs.append(fused)
+        return np.vstack([1 - fused, fused]).T
 
-        fused_probs = np.array(fused_probs)
-
-        return np.vstack([1 - fused_probs, fused_probs]).T
-
-    def explain_instance(self, instance, num_features=20):
+    # --------------------------------------------------
+    # Main entry point
+    # --------------------------------------------------
+    def explain_instance(self, instance: np.ndarray, num_features: int = 20) -> dict:
         """
-        Returns grouped explanation dictionary
+        Explain a single 770-d feature vector.
+
+        Returns dict with:
+          embedding_signal   – aggregated LIME weight for embedding features
+          consistency_signal – LIME weight for the consistency feature
+          negation_signal    – LIME weight for the negation feature
+          dominant_signal    – name of the strongest contributor
+          raw_weights        – full list of (feature_name, weight) from LIME
         """
+        instance = np.asarray(instance).flatten()
 
         explanation = self.explainer.explain_instance(
             instance,
             self._predict_with_fusion,
-            num_features=num_features
+            num_features=min(num_features, _TOTAL_FEATURES),
+            num_samples=500,
         )
 
         weights = explanation.as_list()
 
-        embedding_contribution = 0.0
-        consistency_contribution = 0.0
-        negation_contribution = 0.0
+        embedding_signal = 0.0
+        consistency_signal = 0.0
+        negation_signal = 0.0
 
-        for feature, weight in weights:
+        for feature_desc, weight in weights:
+            # LIME returns descriptions like "emb_42 > 0.12" or "consistency <= 0.50"
+            name = feature_desc.split()[0] if feature_desc else ""
 
-            # Extract feature index
-            if "feature" in feature:
-                continue
+            if name == "consistency":
+                consistency_signal = weight
+            elif name == "negation":
+                negation_signal = weight
+            elif name.startswith("emb_"):
+                embedding_signal += weight
 
-            try:
-                idx = int(feature.split(" ")[0])
-            except:
-                continue
-
-            if idx < 768:
-                embedding_contribution += weight
-            elif idx == 768:
-                consistency_contribution += weight
-            elif idx == 769:
-                negation_contribution += weight
+        # Determine dominant signal
+        signals = {
+            "Embedding": abs(embedding_signal),
+            "Consistency": abs(consistency_signal),
+            "Negation": abs(negation_signal),
+        }
+        dominant = max(signals, key=signals.get)
 
         return {
-            "embedding_signal": embedding_contribution,
-            "consistency_signal": consistency_contribution,
-            "negation_signal": negation_contribution,
-            "raw_explanation": weights
+            "embedding_signal": round(embedding_signal, 4),
+            "consistency_signal": round(consistency_signal, 4),
+            "negation_signal": round(negation_signal, 4),
+            "dominant_signal": dominant,
+            "raw_weights": weights,
         }

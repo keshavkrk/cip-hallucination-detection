@@ -246,6 +246,35 @@ header[data-testid="stHeader"] { background: transparent !important; }
     margin-bottom: 1rem;
 }
 
+/* ---- Explainability card ---- */
+.xai-card {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 14px;
+    padding: 1.2rem 1.4rem;
+    margin-top: 0.5rem;
+}
+.xai-dominant {
+    display: inline-block;
+    background: rgba(139, 92, 246, 0.12);
+    border: 1px solid rgba(139, 92, 246, 0.3);
+    border-radius: 8px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: #a78bfa;
+    letter-spacing: 0.04em;
+}
+.xai-unavailable {
+    background: var(--bg-card);
+    border: 1px solid var(--border-subtle);
+    border-radius: 12px;
+    padding: 1rem 1.2rem;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    font-style: italic;
+}
+
 /* ---- Divider ---- */
 .divider-line {
     border: none;
@@ -433,6 +462,72 @@ def render_analysis(result: dict):
             <div class="metric-label">Negation Score</div>
             <div class="metric-value">{result['negation']:.2f}</div>
         </div>""", unsafe_allow_html=True)
+
+    # Explainability (LIME)
+    st.markdown(
+        '<div class="section-header"><span class="dot violet" style="background:#8b5cf6"></span>'
+        "EXPLAINABILITY · LIME</div>",
+        unsafe_allow_html=True,
+    )
+
+    explanation = result.get("explanation")
+    if explanation:
+        emb_sig = explanation["embedding_signal"]
+        con_sig = explanation["consistency_signal"]
+        neg_sig = explanation["negation_signal"]
+        dominant = explanation["dominant_signal"]
+
+        # Horizontal bar chart
+        signals = ["Negation", "Consistency", "Embedding"]
+        values = [neg_sig, con_sig, emb_sig]
+        colors = ["#f43f5e", "#10b981", "#6366f1"]
+
+        fig_xai = go.Figure()
+        fig_xai.add_trace(go.Bar(
+            y=signals,
+            x=values,
+            orientation="h",
+            marker=dict(color=colors, line=dict(width=0)),
+            text=[f"{v:+.4f}" for v in values],
+            textposition="outside",
+            textfont=dict(color="#9ca3af", size=12, family="Inter"),
+        ))
+        fig_xai.update_layout(
+            height=200,
+            margin=dict(t=10, b=10, l=10, r=60),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            font=dict(family="Inter", color="#9ca3af"),
+            xaxis=dict(
+                showgrid=True,
+                gridcolor="rgba(255,255,255,0.05)",
+                zeroline=True,
+                zerolinecolor="rgba(255,255,255,0.15)",
+                zerolinewidth=1,
+                tickfont=dict(size=10),
+            ),
+            yaxis=dict(tickfont=dict(size=12, color="#f0f0f5")),
+            bargap=0.35,
+        )
+        st.plotly_chart(fig_xai, use_container_width=True)
+
+        st.markdown(
+            f'<div class="xai-card">'
+            f'🧠 <strong>Dominant signal:</strong> '
+            f'<span class="xai-dominant">{dominant}</span>  —  '
+            f'This signal had the strongest influence on the final prediction.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(
+            '<div class="xai-unavailable">'
+            "🔒 LIME explainability requires a trained model "
+            "(<code>hallucination_model.pkl</code>) and background data "
+            "(<code>X.npy</code>). Run <code>train_model.py</code> to enable."
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
     # Details expander
     st.markdown(

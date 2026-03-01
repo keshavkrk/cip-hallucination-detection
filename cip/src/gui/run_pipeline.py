@@ -12,6 +12,7 @@ sys.path.append(PROJECT_ROOT)
 # Now imports will work
 # -------------------------------------------------
 
+import logging
 import numpy as np
 import joblib
 
@@ -21,10 +22,15 @@ from classifier.feature_extractor import DistilBERTFeatureExtractor
 from rephrase.module3.rephrase_consistency import RephraseConsistencyAnalyzer
 from negation.negation_probe import NegationProbe
 from fusion.fusion_layer import fuse_prediction
+from explainability.lime_explainer import CIPExplainer
 
+logger = logging.getLogger("CIPPipeline")
 
-MODEL_PATH = os.path.join(os.path.dirname(PROJECT_ROOT), "data", "processed", "hallucination_model.pkl")
+DATA_DIR = os.path.join(os.path.dirname(PROJECT_ROOT), "data", "processed")
+MODEL_PATH = os.path.join(DATA_DIR, "hallucination_model.pkl")
+BACKGROUND_PATH = os.path.join(DATA_DIR, "X.npy")
 _model = None
+_explainer = None
 
 
 def _get_model():
@@ -35,6 +41,21 @@ def _get_model():
     if os.path.isfile(MODEL_PATH):
         _model = joblib.load(MODEL_PATH)
         return _model
+    return None
+
+
+def _get_explainer():
+    """Lazy-load LIME explainer; returns None if model/data missing."""
+    global _explainer
+    if _explainer is not None:
+        return _explainer
+    if os.path.isfile(MODEL_PATH) and os.path.isfile(BACKGROUND_PATH):
+        try:
+            X_bg = np.load(BACKGROUND_PATH)
+            _explainer = CIPExplainer(MODEL_PATH, X_bg)
+            return _explainer
+        except Exception as e:
+            logger.warning(f"Could not load LIME explainer: {e}")
     return None
 
 
@@ -96,6 +117,15 @@ def run_cip_pipeline(question: str) -> dict:
 
     prediction = "Hallucination" if final_risk > 0.5 else "Factual"
 
+    # Step 8: Explainability (LIME)
+    explanation = None
+    explainer = _get_explainer()
+    if explainer is not None:
+        try:
+            explanation = explainer.explain_instance(vector.flatten())
+        except Exception as e:
+            logger.warning(f"LIME explanation failed: {e}")
+
     return {
         "answer": answer,
         "p_model": float(p_model),
@@ -108,4 +138,5 @@ def run_cip_pipeline(question: str) -> dict:
         "negated_question": negated_question,
         "negated_answer": negated_answer,
         "model_loaded": model is not None,
+        "explanation": explanation,
     }
