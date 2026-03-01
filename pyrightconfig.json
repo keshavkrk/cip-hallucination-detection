@@ -1,0 +1,9 @@
+{
+  "executionEnvironments": [
+    {
+      "root": "cip/src",
+      "extraPaths": ["cip/src"]
+    }
+  ],
+  "extraPaths": ["cip/src"]
+}

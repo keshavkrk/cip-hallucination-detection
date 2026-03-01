@@ -1,33 +1,31 @@
 # cip/src/fusion/fusion_layer.py
 
-def fuse_prediction(p_model, c_score, n_score):
+ALPHA = 0.6
+BETA = 0.25
+GAMMA = 0.15
+
+
+def fuse_prediction(p_model: float,
+                    consistency_score: float,
+                    negation_score: float) -> float:
     """
-    Combines:
-        - SVM hallucination probability
-        - Consistency score
-        - Negation contradiction score
-
-    Returns:
-        final hallucination probability
+    Weighted fusion of:
+    - Embedding model probability
+    - Rephrase consistency score
+    - Negation contradiction score
     """
 
-    # Confidence guard
-    if abs(p_model - 0.5) > 0.25:
-        return p_model
+    # Safety for None values
+    if consistency_score is None:
+        consistency_score = 0.0
 
-    # Convert to aligned risk signals
-    risk_model = p_model
-    risk_consistency = 1 - c_score
-    risk_negation = n_score
+    if negation_score is None:
+        negation_score = 0.0
 
-    # Weighted fusion (LOCKED)
-    final_risk = (
-        0.5 * risk_model
-        + 0.25 * risk_consistency
-        + 0.25 * risk_negation
+    final_score = (
+        ALPHA * p_model +
+        BETA * (1 - consistency_score) +   # invert consistency
+        GAMMA * negation_score
     )
 
-    # Clamp to valid range
-    final_risk = max(0.0, min(1.0, final_risk))
-
-    return final_risk
+    return float(final_score)

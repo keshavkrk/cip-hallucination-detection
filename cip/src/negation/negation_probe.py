@@ -23,9 +23,10 @@ class NegationProbe:
     def run(self, question: str, original_answer: str) -> dict:
 
         # Default safe return
-        safe_output = {
+        safe_output: dict = {
             "antonym_contradiction_flag": 0,
             "contradiction_score": 0.0,
+            "negated_question": None,
             "negated_answer": None,
             "reason": None
         }
@@ -58,6 +59,7 @@ class NegationProbe:
             return {
                 "antonym_contradiction_flag": flag,
                 "contradiction_score": score,
+                "negated_question": neg_question,
                 "negated_answer": neg_answer,
                 "reason": None
             }
